@@ -19,43 +19,16 @@
  */
 package org.sonar.batch.design;
 
-import org.sonar.api.batch.RequiresDB;
-
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonDeserializationContext;
-import com.google.gson.JsonDeserializer;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
-import org.apache.maven.artifact.Artifact;
-import org.apache.maven.artifact.factory.ArtifactFactory;
-import org.apache.maven.artifact.metadata.ArtifactMetadataSource;
-import org.apache.maven.artifact.repository.ArtifactRepository;
-import org.apache.maven.artifact.resolver.ArtifactCollector;
-import org.apache.maven.shared.dependency.tree.DependencyNode;
-import org.apache.maven.shared.dependency.tree.DependencyTreeBuilder;
-import org.apache.maven.shared.dependency.tree.DependencyTreeBuilderException;
-import org.apache.maven.shared.dependency.tree.filter.AncestorOrSelfDependencyNodeFilter;
-import org.apache.maven.shared.dependency.tree.filter.DependencyNodeFilter;
-import org.apache.maven.shared.dependency.tree.filter.StateDependencyNodeFilter;
-import org.apache.maven.shared.dependency.tree.traversal.BuildingDependencyNodeVisitor;
-import org.apache.maven.shared.dependency.tree.traversal.CollectingDependencyNodeVisitor;
-import org.apache.maven.shared.dependency.tree.traversal.DependencyNodeVisitor;
-import org.apache.maven.shared.dependency.tree.traversal.FilteringDependencyNodeVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.sonar.api.batch.Sensor;
-import org.sonar.api.batch.SensorContext;
-import org.sonar.api.batch.SonarIndex;
-import org.sonar.api.batch.SupportedEnvironment;
+import org.sonar.api.batch.*;
 import org.sonar.api.config.Settings;
 import org.sonar.api.design.Dependency;
 import org.sonar.api.resources.Library;
 import org.sonar.api.resources.Project;
 import org.sonar.api.resources.Resource;
-import org.sonar.api.utils.SonarException;
 import org.sonar.batch.index.ResourcePersister;
 
 import java.lang.reflect.Type;
@@ -71,32 +44,14 @@ public class MavenDependenciesSensor implements Sensor {
 
   private static final Logger LOG = LoggerFactory.getLogger(MavenDependenciesSensor.class);
 
-  private final ArtifactRepository localRepository;
-  private final ArtifactFactory artifactFactory;
-  private final ArtifactMetadataSource artifactMetadataSource;
-  private final ArtifactCollector artifactCollector;
-  private final DependencyTreeBuilder treeBuilder;
   private final SonarIndex index;
   private final Settings settings;
   private final ResourcePersister resourcePersister;
 
-  public MavenDependenciesSensor(Settings settings, ArtifactRepository localRepository, ArtifactFactory artifactFactory, ArtifactMetadataSource artifactMetadataSource,
-    ArtifactCollector artifactCollector, DependencyTreeBuilder treeBuilder, SonarIndex index, ResourcePersister resourcePersister) {
-    this.settings = settings;
-    this.localRepository = localRepository;
-    this.artifactFactory = artifactFactory;
-    this.artifactMetadataSource = artifactMetadataSource;
-    this.artifactCollector = artifactCollector;
-    this.index = index;
-    this.treeBuilder = treeBuilder;
-    this.resourcePersister = resourcePersister;
-  }
-
-  /**
-   * Used with SQ Maven plugin 2.5+
-   */
   public MavenDependenciesSensor(Settings settings, SonarIndex index, ResourcePersister resourcePersister) {
-    this(settings, null, null, null, null, null, index, resourcePersister);
+    this.settings = settings;
+    this.index = index;
+    this.resourcePersister = resourcePersister;
   }
 
   @Override
@@ -181,45 +136,6 @@ public class MavenDependenciesSensor implements Sensor {
       } catch (Exception e) {
         throw new IllegalStateException("Unable to deserialize dependency information: " + depsAsJson, e);
       }
-    } else if (treeBuilder != null) {
-      computeDependencyTree(project, context);
-    }
-  }
-
-  private void computeDependencyTree(final Project project, final SensorContext context) {
-    LOG.warn("Computation of Maven dependencies by SonarQube is deprecated. Please update the version of SonarQube Maven plugin to 2.5+");
-    try {
-      DependencyNode root = treeBuilder.buildDependencyTree(project.getPom(), localRepository, artifactFactory, artifactMetadataSource, null, artifactCollector);
-
-      DependencyNodeVisitor visitor = new BuildingDependencyNodeVisitor(new DependencyNodeVisitor() {
-        @Override
-        public boolean visit(DependencyNode node) {
-          return true;
-        }
-
-        @Override
-        public boolean endVisit(DependencyNode node) {
-          if (node.getParent() != null && node.getParent() != node) {
-            saveDependency(project, node, context);
-          }
-          return true;
-        }
-      });
-
-      // mode verbose OFF : do not show the same lib many times
-      DependencyNodeFilter filter = StateDependencyNodeFilter.INCLUDED;
-
-      CollectingDependencyNodeVisitor collectingVisitor = new CollectingDependencyNodeVisitor();
-      DependencyNodeVisitor firstPassVisitor = new FilteringDependencyNodeVisitor(collectingVisitor, filter);
-      root.accept(firstPassVisitor);
-
-      DependencyNodeFilter secondPassFilter = new AncestorOrSelfDependencyNodeFilter(collectingVisitor.getNodes());
-      visitor = new FilteringDependencyNodeVisitor(visitor, secondPassFilter);
-
-      root.accept(visitor);
-
-    } catch (DependencyTreeBuilderException e) {
-      throw new SonarException("Can not load the graph of dependencies of the project " + project.getKey(), e);
     }
   }
 
@@ -241,28 +157,6 @@ public class MavenDependenciesSensor implements Sensor {
     Resource result = context.getResource(depProject);
     if (result == null || !((Project) result).getAnalysisVersion().equals(dependency.version())) {
       Library lib = new Library(dependency.key(), dependency.version());
-      index.addResource(lib);
-      // Temporary hack since we need snapshot id to persist dependencies
-      resourcePersister.persist();
-      result = context.getResource(lib);
-    }
-    return result;
-  }
-
-  protected void saveDependency(final Project project, DependencyNode node, SensorContext context) {
-    Resource from = (node.getParent().getParent() == null) ? index.getProject() : toResource(project, node.getParent().getArtifact(), context);
-    Resource to = toResource(project, node.getArtifact(), context);
-    Dependency dependency = new Dependency(from, to);
-    dependency.setUsage(node.getArtifact().getScope());
-    dependency.setWeight(1);
-    context.saveDependency(dependency);
-  }
-
-  protected Resource toResource(final Project project, Artifact artifact, SensorContext context) {
-    Project depWithBranch = Project.createFromMavenIds(artifact.getGroupId(), artifact.getArtifactId(), project.getBranch());
-    Resource result = context.getResource(depWithBranch);
-    if (result == null || !((Project) result).getAnalysisVersion().equals(artifact.getBaseVersion())) {
-      Library lib = Library.createFromMavenIds(artifact.getGroupId(), artifact.getArtifactId(), artifact.getBaseVersion());
       index.addResource(lib);
       // Temporary hack since we need snapshot id to persist dependencies
       resourcePersister.persist();

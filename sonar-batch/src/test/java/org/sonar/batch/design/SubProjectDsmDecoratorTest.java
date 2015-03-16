@@ -19,7 +19,6 @@
  */
 package org.sonar.batch.design;
 
-import edu.emory.mathcs.backport.java.util.Collections;
 import org.apache.commons.lang.ObjectUtils;
 import org.junit.Before;
 import org.junit.Test;
@@ -34,15 +33,12 @@ import org.sonar.api.resources.Directory;
 import org.sonar.api.resources.Project;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.argThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 public class SubProjectDsmDecoratorTest {
 
@@ -86,7 +82,7 @@ public class SubProjectDsmDecoratorTest {
     decorator.decorate(p, moduleContext);
 
     // Should not do anything if module has no dir
-    when(moduleContext.getChildren()).thenReturn(Collections.emptyList());
+    when(moduleContext.getChildren()).thenReturn(Collections.<DecoratorContext>emptyList());
     decorator.decorate(module, moduleContext);
 
     verify(moduleContext, never()).saveMeasure(any(Measure.class));

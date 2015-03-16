@@ -19,7 +19,6 @@
  */
 package org.sonar.batch.design;
 
-import edu.emory.mathcs.backport.java.util.Collections;
 import org.apache.commons.lang.ObjectUtils;
 import org.junit.Before;
 import org.junit.Test;
@@ -36,16 +35,13 @@ import org.sonar.api.resources.Project;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.argThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 public class DirectoryDsmDecoratorTest {
 
@@ -87,7 +83,7 @@ public class DirectoryDsmDecoratorTest {
     decorator.decorate(new Project("foo"), dirContext);
 
     // Should not do anything if dir has no files
-    when(dirContext.getChildren()).thenReturn(Collections.emptyList());
+    when(dirContext.getChildren()).thenReturn(Collections.<DecoratorContext>emptyList());
     decorator.decorate(dir, dirContext);
 
     verify(dirContext, never()).saveMeasure(any(Measure.class));

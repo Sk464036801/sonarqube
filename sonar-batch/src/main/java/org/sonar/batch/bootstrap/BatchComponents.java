@@ -23,9 +23,6 @@ import com.google.common.collect.Lists;
 import org.sonar.batch.cpd.CpdComponents;
 import org.sonar.batch.design.*;
 import org.sonar.batch.issue.tracking.IssueTracking;
-import org.sonar.batch.maven.MavenProjectBootstrapper;
-import org.sonar.batch.maven.MavenProjectBuilder;
-import org.sonar.batch.maven.MavenProjectConverter;
 import org.sonar.batch.scan.report.*;
 import org.sonar.batch.scm.ScmConfiguration;
 import org.sonar.batch.scm.ScmSensor;
@@ -45,9 +42,6 @@ public class BatchComponents {
 
   public static Collection all(DefaultAnalysisMode analysisMode) {
     List components = Lists.newArrayList(
-      // Maven
-      MavenProjectBootstrapper.class, MavenProjectConverter.class, MavenProjectBuilder.class,
-
       // Design
       ProjectDsmDecorator.class,
       SubProjectDsmDecorator.class,
