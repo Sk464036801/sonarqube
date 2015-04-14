@@ -19,25 +19,29 @@
  */
 package org.sonar.server.platform;
 
-import org.sonar.api.platform.ComponentContainer;
-import org.sonar.api.platform.Server;
-import org.sonar.api.utils.log.Loggers;
-import org.sonar.core.persistence.DatabaseVersion;
+import java.util.Collection;
+import java.util.Properties;
 
 import javax.annotation.CheckForNull;
 import javax.servlet.ServletContext;
-import java.util.Collection;
-import java.util.Properties;
+
+import org.sonar.api.platform.ComponentContainer;
+import org.sonar.api.platform.Server;
+import org.sonar.api.utils.log.Logger;
+import org.sonar.api.utils.log.Loggers;
+import org.sonar.core.persistence.DatabaseVersion;
 
 /**
  * @since 2.2
  */
 public class Platform {
 
+  private static final Logger LOGGER = Loggers.get(Platform.class);
+
   private static final Platform INSTANCE = new Platform();
 
   private ServerComponents serverComponents;
-  private ComponentContainer level1Container, level2Container, level3Container, level4Container;
+  private ComponentContainer level1Container, level2Container, safeModeContainer, level3Container, level4Container;
   private ComponentContainer currentContainer;
   private boolean dbConnected = false;
   private boolean started = false;
@@ -78,14 +82,29 @@ public class Platform {
 
   // Platform is injected in Pico, so do not rename this method "start"
   public void doStart() {
-    if (!started && getDatabaseStatus() == DatabaseVersion.Status.UP_TO_DATE) {
+    if (started && !isInSafeMode()) {
+      return;
+    }
+
+    if (getDatabaseStatus() == DatabaseVersion.Status.UP_TO_DATE) {
       startLevel34Containers();
-      started = true;
+      if (isInSafeMode()) {
+        safeModeContainer.stopComponents();
+        safeModeContainer = null;
+      }
+    }
+    else {
+      LOGGER.info("DB needs migration, entering safe mode");
+      startSafeModeContainer();
     }
   }
 
   public boolean isStarted() {
-    return started;
+    return started && !isInSafeMode();
+  }
+
+  public boolean isInSafeMode() {
+    return started && safeModeContainer != null && currentContainer == safeModeContainer;
   }
 
   /**
@@ -115,19 +134,37 @@ public class Platform {
     level3Container = level2Container.createChild();
     level3Container.addSingletons(serverComponents.level3Components());
     level3Container.startComponents();
-    currentContainer = level3Container;
 
     level4Container = level3Container.createChild();
     serverComponents.startLevel4Components(level4Container);
     currentContainer = level4Container;
     executeStartupTasks();
+    started = true;
   }
 
   public void executeStartupTasks() {
     serverComponents.executeStartupTasks(level4Container);
   }
 
+  private void startSafeModeContainer() {
+    safeModeContainer = level2Container.createChild();
+    safeModeContainer.addSingletons(serverComponents.safeModeComponents());
+    safeModeContainer.startComponents();
+    currentContainer = safeModeContainer;
+    started = true;
+  }
+
+  private void stopSafeModeContainer() {
+    safeModeContainer.stopComponents();
+    currentContainer = level2Container;
+    safeModeContainer = null;
+    started = false;
+  }
+
   public void restart() {
+    if (isInSafeMode()) {
+      stopSafeModeContainer();
+    }
     // Do not need to initialize database connection, so level 1 is skipped
     if (level2Container != null) {
       level2Container.stopComponents();
@@ -148,6 +185,10 @@ public class Platform {
       try {
         level1Container.stopComponents();
         level1Container = null;
+        level2Container = null;
+        level3Container = null;
+        safeModeContainer = null;
+        level4Container = null;
         currentContainer = null;
         dbConnected = false;
         started = false;
