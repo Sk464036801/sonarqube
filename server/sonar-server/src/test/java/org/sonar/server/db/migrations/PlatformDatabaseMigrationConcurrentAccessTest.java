@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.After;
 import org.junit.Test;
+import org.sonar.server.platform.Platform;
 import org.sonar.server.ruby.RubyBridge;
 import org.sonar.server.ruby.RubyDatabaseMigration;
 
@@ -71,7 +72,8 @@ public class PlatformDatabaseMigrationConcurrentAccessTest {
     }
   };
   private RubyBridge rubyBridge = mock(RubyBridge.class);
-  private PlatformDatabaseMigration underTest = new PlatformDatabaseMigration(rubyBridge, executorService);
+  private Platform platform = mock(Platform.class);
+  private PlatformDatabaseMigration underTest = new PlatformDatabaseMigration(rubyBridge, executorService, platform);
 
   @After
   public void tearDown() throws Exception {

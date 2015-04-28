@@ -19,15 +19,15 @@
  */
 package org.sonar.server.db.migrations;
 
-import org.sonar.api.utils.log.Logger;
-import org.sonar.api.utils.log.Loggers;
-import org.sonar.server.ruby.RubyBridge;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nullable;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
+import org.sonar.api.utils.log.Logger;
+import org.sonar.api.utils.log.Loggers;
+import org.sonar.server.platform.Platform;
+import org.sonar.server.ruby.RubyBridge;
 
 /**
  * Handles concurrency to make sure only one DB migration can run at a time.
@@ -41,6 +41,7 @@ public class PlatformDatabaseMigration implements DatabaseMigration {
    * ExecutorService implements threads management.
    */
   private final PlatformDatabaseMigrationExecutorService executorService;
+  private final Platform platform;
   /**
    * This lock implements thread safety from concurrent calls of method {@link #startIt()}
    */
@@ -60,9 +61,10 @@ public class PlatformDatabaseMigration implements DatabaseMigration {
   @Nullable
   private Throwable failureError;
 
-  public PlatformDatabaseMigration(RubyBridge rubyBridge, PlatformDatabaseMigrationExecutorService executorService) {
+  public PlatformDatabaseMigration(RubyBridge rubyBridge, PlatformDatabaseMigrationExecutorService executorService, Platform platform) {
     this.rubyBridge = rubyBridge;
     this.executorService = executorService;
+    this.platform = platform;
   }
 
   @Override
@@ -97,17 +99,37 @@ public class PlatformDatabaseMigration implements DatabaseMigration {
         startDate = new Date();
         failureError = null;
         try {
-          LOGGER.info("Starting DB Migration at {}", startDate);
-          rubyBridge.databaseMigration().trigger();
-          LOGGER.info("DB Migration ended successfully at {}", new Date());
+          upgradeDb();
+          restartContainer();
+          recreateWebRoutes();
           status = Status.SUCCEEDED;
         } catch (Throwable t) {
-          LOGGER.error("DB Migration failed and ended at " + startDate + " with an exception", t);
+          LOGGER.error(
+            "DB Migration or container restart failed. Process ended at " + startDate + " with an exception", t
+            );
           status = Status.FAILED;
           failureError = t;
         } finally {
           running.getAndSet(false);
         }
+      }
+
+      private void upgradeDb() {
+        LOGGER.info("Starting DB Migration at {}", startDate);
+        rubyBridge.databaseMigration().trigger();
+        LOGGER.info("DB Migration ended successfully at {}", new Date());
+      }
+
+      private void restartContainer() {
+        LOGGER.info("Restarting container at {}", new Date());
+        platform.doStart();
+        LOGGER.info("Container restarted successfully at {}", new Date());
+      }
+
+      private void recreateWebRoutes() {
+        LOGGER.info("Recreating web routes at {}", new Date());
+        rubyBridge.railsRoutes().recreate();
+        LOGGER.info("Routes recreated successfully at {}", new Date());
       }
     });
   }
