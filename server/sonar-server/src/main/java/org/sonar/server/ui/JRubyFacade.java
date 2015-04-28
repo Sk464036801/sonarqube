@@ -19,6 +19,14 @@
  */
 package org.sonar.server.ui;
 
+import java.net.InetAddress;
+import java.sql.Connection;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
 import org.sonar.api.config.License;
 import org.sonar.api.config.PropertyDefinitions;
 import org.sonar.api.config.Settings;
@@ -35,10 +43,12 @@ import org.sonar.api.web.Page;
 import org.sonar.api.web.RubyRailsWebservice;
 import org.sonar.api.web.Widget;
 import org.sonar.core.persistence.Database;
+import org.sonar.core.persistence.DatabaseVersion;
 import org.sonar.core.resource.ResourceIndexerDao;
 import org.sonar.core.timemachine.Periods;
 import org.sonar.process.ProcessProperties;
 import org.sonar.server.component.ComponentCleanerService;
+import org.sonar.server.db.migrations.DatabaseMigration;
 import org.sonar.server.db.migrations.DatabaseMigrator;
 import org.sonar.server.measure.MeasureFilterEngine;
 import org.sonar.server.measure.MeasureFilterResult;
@@ -46,22 +56,16 @@ import org.sonar.server.platform.Platform;
 import org.sonar.server.platform.ServerIdGenerator;
 import org.sonar.server.platform.ServerSettings;
 import org.sonar.server.platform.SettingsChangeNotifier;
-import org.sonar.server.plugins.*;
+import org.sonar.server.plugins.InstalledPluginReferentialFactory;
+import org.sonar.server.plugins.PluginDownloader;
+import org.sonar.server.plugins.ServerPluginJarsInstaller;
+import org.sonar.server.plugins.ServerPluginRepository;
+import org.sonar.server.plugins.UpdateCenterMatrixFactory;
 import org.sonar.server.rule.RuleRepositories;
 import org.sonar.server.user.NewUserNotifier;
 import org.sonar.updatecenter.common.PluginReferential;
 import org.sonar.updatecenter.common.UpdateCenter;
 import org.sonar.updatecenter.common.Version;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nullable;
-
-import java.net.InetAddress;
-import java.sql.Connection;
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
 
 import static com.google.common.collect.Lists.newArrayList;
 
@@ -372,5 +376,35 @@ public final class JRubyFacade {
 
   public String getPeriodAbbreviation(int periodIndex) {
     return get(Periods.class).abbreviation(periodIndex);
+  }
+
+  /**
+   * Checks whether the SQ instance is up and running (ie. not in safemode and with an up-to-date database).
+   * <p>
+   * This method duplicates most of the logic code written in {@link org.sonar.server.platform.ws.ServerMigrateWsAction}
+   * class. There is no need to refactor code to avoid this duplication since this method is only used by RoR code
+   * which will soon be replaced by pure JS code based on the {@link org.sonar.server.platform.ws.ServerMigrateWsAction}
+   * WebService.
+   * </p>
+   */
+  public boolean isSonarAccessAllowed() {
+    ComponentContainer container = Platform.getInstance().getContainer();
+    DatabaseVersion databaseVersion = container.getComponentByType(DatabaseVersion.class);
+    Integer currentVersion = databaseVersion.getVersion();
+    if (currentVersion == null) {
+      throw new IllegalStateException("Version can not be retrieved from Database. Database is either blank or corrupted");
+    }
+    if (currentVersion >= DatabaseVersion.LAST_VERSION) {
+      return true;
+    }
+
+    Database database = container.getComponentByType(Database.class);
+    if (!database.getDialect().supportsMigration()) {
+      return false;
+    }
+
+    DatabaseMigration databaseMigration = container.getComponentByType(DatabaseMigration.class);
+    Loggers.get(JRubyFacade.class).info("databaseMigration.status()=" + databaseMigration.status());
+    return databaseMigration.status() == DatabaseMigration.Status.SUCCEEDED;
   }
 }
